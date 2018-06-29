@@ -1,54 +1,96 @@
 import 'package:flutter/material.dart';
-import 'package:english_words/english_words.dart';
+import 'dart:async';
+import 'dart:convert';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+// utils
+List<Photo> parsePhotos( String responseBody ){
+  final parsed = json.decode(responseBody).cast<Map<String,dynamic>>();
+  return parsed.map<Photo>((json) => Photo.fromJson(json)).toList();
+}
+
+Future<List<Photo>> fetchPhotos( http.Client client ) async {
+  //return client.get('https://thor.net.nait.ca/~herbv/images/web.php');
+  final response = await client.get('https://thor.net.nait.ca/~herbv/images/web.php');
+  return compute( parsePhotos, response.body);
+}
+
+class Photo {
+  final int id;
+  final String title;
+  final String thumbnailUrl;
+
+  Photo( {this.id, this.title, this.thumbnailUrl });
+  bool operator == ( other ) => other is Photo && this.id == other.id;
+  int get hashcode => id.hashCode;
+  factory Photo.fromJson( Map<String, dynamic> json ) {
+    return Photo( 
+      id: json['id'] as int,
+      title: json['title'] as String,
+      thumbnailUrl: json['thumbnailUrl'] as String,
+    );
+  }
+}
 
 void main() => runApp(new MyApp());
 
 class MyApp extends StatelessWidget {
+  final title = 'Web-o-tron';
   @override
   Widget build(BuildContext context) {
     return new MaterialApp(
-      title: 'Web-o=tron',
+      title: this.title,
       theme: new ThemeData( primaryColor: Colors.lightGreen, fontFamily: 'Raleway'),
-      home: new RandomWords(),
+      home: new PhotoList(this.title),
     );
   }
 }
-class RandomWords extends StatefulWidget {
+class PhotoList extends StatefulWidget {
+  final title;
+  PhotoList( this.title );
   @override
-  State<StatefulWidget> createState() => new RandomWordsState();
+  State<StatefulWidget> createState() => new PhotoListState(this.title);
 }
-class RandomWordsState extends State<RandomWords> {
-  final _suggestions = <WordPair>[];
-  final _saved = Set<WordPair>();
-  final _bigFont = const TextStyle( fontSize: 18.0 );
+class PhotoListState extends State<PhotoList> {
+  String title;
+  final _suggestions = List<Photo>();
+  final _saved = Set<Photo>();
+  final _bigFont = const TextStyle( fontSize: 24.0 );
+  PhotoListState( this.title );
   @override Widget build( BuildContext context ) {
     return new Scaffold( 
       appBar: new AppBar( 
-        title: new Text('Web-o=tron'), 
+        title: new Text(this.title), 
         actions: <Widget>[
-          new IconButton(icon: new Icon(Icons.list), onPressed: _pushSaved ,)
+          new IconButton(icon: new Icon(Icons.visibility), onPressed: _pushSaved ,)
         ],
       ), 
-      body: _buildSuggestions(),
+      body: FutureBuilder<List<Photo>>(
+        future: fetchPhotos(http.Client()),
+        builder: (context,snapshot) {
+          if( snapshot.hasError) print( snapshot.error );
+          return snapshot.hasData ? _buildPhotoList( snapshot.data ) : Center(child: CircularProgressIndicator());
+        },
+      ),
       );
   }
-  Widget _buildSuggestions(){
+  Widget _buildPhotoList( List<Photo> photos ){
     return new ListView.builder(
+      itemCount: photos.length * 2,
       padding: const EdgeInsets.all(16.0),
       itemBuilder: (context, i) {
         if( i.isOdd) return new Divider();
         final index = i ~/ 2;
-        if( index >= _suggestions.length ){
-          _suggestions.addAll(generateWordPairs().take(10));
-        }
-        return _buildRow(_suggestions[index]);
+        return _buildRow(photos[index]);
       },
     );
   }
-  Widget _buildRow( WordPair pair){
-    final alreadySaved = _saved.contains(pair);
+  Widget _buildRow( Photo photo){
+    final alreadySaved = _saved.contains(photo);
+    print('Building row with ' + photo.id.toString() + ' State : ' + alreadySaved.toString());
     return new ListTile( 
-      title: new Text(pair.asPascalCase, style: _bigFont,),
+      title: new Text(photo.title, style: _bigFont,),
       trailing: new Icon(
         alreadySaved ? Icons.favorite : Icons.favorite_border,
         color: alreadySaved ? Colors.blue : null,
@@ -56,9 +98,9 @@ class RandomWordsState extends State<RandomWords> {
       onTap: () {
         setState(() {
           if( alreadySaved ) {
-            _saved.remove(pair);
+            _saved.remove(photo);
           } else {
-            _saved.add(pair);
+            _saved.add(photo);
           }
         });
       },
@@ -69,19 +111,15 @@ class RandomWordsState extends State<RandomWords> {
       new MaterialPageRoute(
         builder: (context) {
           final tiles = _saved.map(
-            (pair) {
-              return new ListTile(
-                title: new Text(pair.asPascalCase, style: _bigFont,),
-              );
+            (photo) {
+              return new Image.network(photo.thumbnailUrl);
             }
           );
-          final divided = ListTile.divideTiles(
-            context: context,
-            tiles: tiles,
-          ).toList();
           return new Scaffold(
             appBar: new AppBar( title: new Text('Saved Suggestions'),),
-            body: new ListView(children: divided,),
+            body: new GridView(
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount( crossAxisCount: 2,),
+              children: tiles.toList(),),
           );
         }
       ),
